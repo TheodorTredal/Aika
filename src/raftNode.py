@@ -1,18 +1,30 @@
 from flask import Flask, request, jsonify
+from enum import Enum
+import time
+import random
+
+class RaftStates(Enum):
+    FOLLOWER = "follower"
+    CANDIDATE = "candidate"
+    LEADER = "leader"
+
 
 '''Må finne ut hvorfor vi har RAFT i AIKA'''
+
+
+
 
 class RaftNode:
     '''RAFT protocol is implemented as the cluster controller.'''
     def __init__(self, host: str, port: int, otherRaftNodes: list):
 
-        # State
 
         # Persistent state on all servers
         self.currentTerm = 0
         self.votedFor = None
         self.log = []
-        self.state = "follower"
+        self.state = RaftStates.FOLLOWER
+        self.leader = None
 
         # Volatile state on all servers
         self.commitIndex = 0 # Index of highest log entry known to be committed (init to 0, increases monotonically)
@@ -37,7 +49,6 @@ class RaftNode:
             return jsonify({
                 "nodes": self.otherRaftNodes
             })
-        
 
         @self.app.route("/raft-node-info", methods=["GET"])
         def raft_node_info():
@@ -49,7 +60,7 @@ class RaftNode:
                 "lastApplied": self.lastApplied,
                 "nextIndex": self.nextIndex,
                 "matchIndex": self.matchIndex,
-                # "otherRaftNodes": self.otherRaftNodes,
+                "otherRaftNodes": self.otherRaftNodes,
                 "address": f"{self.host}:{self.port}"
                 })
         
@@ -116,6 +127,25 @@ class RaftNode:
 
 
         # if self.votedFor is None or candidateId and candidate's lgo is at least as up tp date as receiver's log,  grant vote
+
+
+    
+
+
+    def running_loop(self):
+
+        while True:
+            timeout_ms = random.randint(150, 300)
+            election_deadline = time.time() + timeout_ms / 1000
+
+            # Venter på svar fra lederen
+            while time.time() < election_deadline:
+
+                # Hvis man får svar fra lederen -> break
+                if self.leader is not None:
+
+
+                    pass
 
 
     def init(self):

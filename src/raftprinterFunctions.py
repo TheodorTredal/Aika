@@ -8,6 +8,7 @@ import requests
 
 
 def AllRaftNodeStatus():
+    '''USED FOR DEBUGGING, find out if the nodes are follower, leader or candidate. '''
 
     with open("../data/activehostport.txt", "r") as file:
         for node_addr in file:

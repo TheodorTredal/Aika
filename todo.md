@@ -20,4 +20,31 @@ For start av testingen:
 
     Vi må håndtere elections
 
-    
+
+
+
+RAFT NOTES
+Election:
+    - Når servere starter opp begynner alle som followers.
+    - En node er i follower state så lenge den får gyldige kall fra lederen eller kandidaten.
+    - Hvis en node ikke får kommunikasjon over en viss mengde tid så starter noden en ny election
+        - Når en node begynner en election så inkrementerer den sin term og sender ut requestVote kall. En node gjør dette til en av tre ting skjer.
+        a) Noden vinner election
+        b) en annen server velger seg selv som lever
+        c) en periode går uten at en node vinner.
+    - en node vinner en election hvis den har majoriteten av stemmene
+    - En node vil bare stemme på en kandidat per term.
+    - Når en node har vunnet sender den ut heartbeats til alle andre noder og sier at jeg er den nye lederen.
+
+    - Mens kandidat noden venter på stemmer, kan kandidat noden motta en AppendEntries RPC fra en annen server som sier at den er lederen. Hvis denne påståtte "lederen" sin term is like stor som kandidat noden sin term vil kandidat noden annerkjenne lederen som gyldig og returnere som følger, hvis RPC kallet er mindre enn kandidaten sitt term vil kandidaten ikke annerkjenne lederen og fortsette i kandidat modus.
+
+    - Hvis det er ingen vinner så vil kandidat nodene få en timeout (random lengde her) og starte en ny election og inkrementere sin term count. Election timeouts are random (150-300ms) 
+
+    Q:
+    Er det sånn at en kandidat sender ut en ny term og spør om å bli leder, også svarer bare noden "ok jeg stemmer på deg". Hva hvis den noden som stemte fortsatt har kontakt med leder fra den forrige term?
+
+    VIKTIG!!
+        Lederen sender (pusher) heartbeats til alle sine følgere og følgerne responderer med 200 ok, dette må sjekkes litt dypere i, det har noe med append_entries å gjøre. 
+
+
+    NÅR LEDEREN HAR BLITT VALGT
