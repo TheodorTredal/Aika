@@ -1,8 +1,7 @@
+otherRaftNodes ['c9-0:50991', 'c11-14:52227', 'c7-16:53236', 'c11-20:59026']
  * Serving Flask app 'raftNode'
  * Debug mode: on
 [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
- * Running on http://c6-8:50368
+ * Running on http://c7-17:59711
 [33mPress CTRL+C to quit[0m
-
-172.21.21.1 - - [24/Feb/2026 16:55:46] "GET /raft-node-info HTTP/1.1" 200 -
-172.21.21.1 - - [24/Feb/2026 17:13:19] "GET /raft-node-info HTTP/1.1" 200 -
+172.21.21.1 - - [25/Feb/2026 14:00:45] "GET /raft-node-info HTTP/1.1" 200 -

@@ -47,4 +47,7 @@ Election:
         Lederen sender (pusher) heartbeats til alle sine følgere og følgerne responderer med 200 ok, dette må sjekkes litt dypere i, det har noe med append_entries å gjøre. 
 
 
-    NÅR LEDEREN HAR BLITT VALGT
+    Lederen sender appendEntries (POST) kall til alle sine følgere, Når følgerene får en post request så timer de ikke ut.
+
+    1. Begynn med selve leader election.
+    2. Append entries.

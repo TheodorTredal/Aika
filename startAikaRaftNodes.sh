@@ -79,17 +79,14 @@ for NODE in "${NODES[@]}"; do
         fi
     done
 
-    PEER_JSON="[ $(IFS=,; echo "${PEERS[*]}") ]"
 
     echo "Starting node $HOST:$PORT"
-    # echo "Peers: $PEER_JSON"
 
     ssh -n "$USER@$HOST" "
         cd $REMOTE_PROJECT_PATH &&
         nohup python3 startupRaftNodes.py \
             $HOST \
             $PORT \
-            '$PEER_JSON' \
         > node.log 2>&1 < /dev/null &
     " &
 
