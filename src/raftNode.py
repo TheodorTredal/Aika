@@ -15,8 +15,6 @@ class RaftStates(Enum):
 '''Må finne ut hvorfor vi har RAFT i AIKA'''
 
 
-
-
 class RaftNode:
     '''RAFT protocol is implemented as the cluster controller.'''
     def __init__(self, host: str, port: int, otherRaftNodes: list):
@@ -71,20 +69,22 @@ class RaftNode:
                 "nextIndex": self.nextIndex,
                 "matchIndex": self.matchIndex,
                 "otherRaftNodes": self.otherRaftNodes,
-                "address": f"{self.host}:{self.port}",
-                "myVotes": self.myVotes
+                "server_id": f"{self.host}:{self.port}",
+                "myVotes": self.myVotes,
+                "leader": self.leader
                 })
         
         @self.app.route("/raft-state-info", methods=["GET"])
         def raft_state_info():
             return jsonify({
+                "ID": f"{self.host}:{self.port}",
                 "state": self.state.value
             })
         
         @self.app.route("/raft-myVote", methods=["GET"])
         def raft_my_vote_info():
             return jsonify({
-                "address": f"{self.host}:{self.port}",
+                "server_id": f"{self.host}:{self.port}",
                 "myVotes": self.myVotes,
                 "VotedFor": self.votedFor
             })
@@ -110,11 +110,16 @@ class RaftNode:
 
             data = request.json
 
+            # newer term -> reset the vote
             if data["term"] > self.currentTerm:
-                self.votedFor = data["candidateID"] # addressen til candidate
                 self.currentTerm = data["term"] # Update this node's term
-                # Return ACK to the candidate
-                self.request_vote_handler(data["candidateID"])
+                self.votedFor = None # Stemme resetter ved nytt term
+                self.state = RaftStates.FOLLOWER
+
+
+            if self.votedFor is None and data["term"] == self.currentTerm:
+                self.votedFor = data["candidateID"] # addressen til candidate
+                self.request_vote_handler(data["candidateID"]) # Send the vote back to the candidate
 
 
         @self.app.route("/candidate-recv-votes", methods=["POST"])
@@ -143,6 +148,7 @@ class RaftNode:
         term = data["term"]
 
         if term >= self.currentTerm:
+            self.leader = data["leaderId"]
             self.currentTerm = term
             self.state = RaftStates.FOLLOWER
             self.reset_election_timer()
@@ -208,6 +214,7 @@ class RaftNode:
             #  case a.
         if len(self.myVotes) >= (self.cluster_size // 2) + 1:
             self.state = RaftStates.LEADER
+            self.leader = f"{self.host}:{self.port}"
             return
 
             #  case b.
@@ -215,6 +222,7 @@ class RaftNode:
 
 
             #  case c.
+
 
     def leader_loop(self):
 
@@ -243,8 +251,8 @@ class RaftNode:
                 if self.state == RaftStates.CANDIDATE:
                     self.candidate_loop()
 
-                # if self.state == RaftStates.LEADER:
-                #     self.leader_loop()
+                if self.state == RaftStates.LEADER:
+                    self.leader_loop()
 
                 time.sleep(0.01)
 
@@ -262,8 +270,3 @@ class RaftNode:
             port=self.port,
             debug=True, 
             use_reloader=False)
-
-
-
-
-
