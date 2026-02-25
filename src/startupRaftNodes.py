@@ -22,6 +22,7 @@ def main():
 
 
     thisRaftNode = RaftNode(host=host, port=port, otherRaftNodes=otherRaftNodes)
+    thisRaftNode.running_loop()
     thisRaftNode.init()
 
 
