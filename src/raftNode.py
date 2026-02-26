@@ -40,11 +40,13 @@ class RaftNode:
         self.matchIndex = [] # Index of highes log entry known to be replicated on server (inited to 0, increases monotonically)
 
         self.last_heartbeat = time.time()
-        self.timeout_ms = random.uniform(0.150, 0.600)
+        self.timeout_ms = random.uniform(0.150, 0.600) # asumes that no two raft node has the same timeout 
+
 
         # Cluster addresses
         self.host = host
         self.port = port
+        self.alive = True
         self.otherRaftNodes: list = otherRaftNodes
         self.app = Flask(__name__)
         self.setup_routes()
@@ -71,7 +73,8 @@ class RaftNode:
                 "otherRaftNodes": self.otherRaftNodes,
                 "server_id": f"{self.host}:{self.port}",
                 "myVotes": self.myVotes,
-                "leader": self.leader
+                "leader": self.leader,
+                "alive": self.alive
                 })
         
         @self.app.route("/raft-state-info", methods=["GET"])
@@ -86,8 +89,72 @@ class RaftNode:
             return jsonify({
                 "server_id": f"{self.host}:{self.port}",
                 "myVotes": self.myVotes,
-                "VotedFor": self.votedFor
+                "VotedFor": self.votedFor,
+                "term": self.currentTerm,
+                "ID": f"{self.host}:{self.port}",
+                "state": self.state.value
             })
+        
+
+        ### TEST DEBUG API KALL
+
+        @self.app.route("/raft-change-status", methods=["POST"])
+        def change_raft_node_status():
+            '''
+            Changes the state of a RAFT node
+
+            state = 1: Follower
+            state = 2: Candidate
+            state = 3: Leader
+            
+            How to use: "curl -X POST http://c0-0:0000/raft-change-status?state=1"'''
+            
+            state = request.args.get("state", type=int)
+            
+            if state == 1:
+                self.state = RaftStates.FOLLOWER
+
+            elif state == 2:
+                self.state = RaftStates.CANDIDATE
+
+            elif state == 3:
+                self.state = RaftStates.LEADER
+
+            else:
+                return {"400": "Bad Request"}
+            
+            return {
+                "success": True,
+                "new_state": self.state.value
+            }, 200
+            
+
+        @self.app.route("/raft-kill-node", methods=["POST"])
+        def kill_node():
+            '''Alives or unalives a raft node.
+            
+            alive_status = 0: Dead
+            alive_status = 1: Alive
+
+            How to use "curl -X POST http://c0-0:0000/raft-kill-node?alive=0"
+            '''
+
+
+            alive = request.args.get("alive", type=int)
+
+            if  alive == 0:
+                self.alive = False
+
+            elif alive == 1:
+                self.alive = True
+
+            else:
+                return {"400": "Bad Request"}
+            
+            return {
+                "success": True,
+                "alive_status": self.alive
+            }
         
 
         ####### Faktiske RAFT funksjoner
@@ -113,13 +180,13 @@ class RaftNode:
             # newer term -> reset the vote
             if data["term"] > self.currentTerm:
                 self.currentTerm = data["term"] # Update this node's term
-                self.votedFor = None # Stemme resetter ved nytt term
+                # self.votedFor = None # Stemme resetter ved nytt term
                 self.state = RaftStates.FOLLOWER
-
-
-            if self.votedFor is None and data["term"] == self.currentTerm:
-                self.votedFor = data["candidateID"] # addressen til candidate
+                self.votedFor = data["candidateID"] # addressen til candidate. Stem på den nye kandidaten
                 self.request_vote_handler(data["candidateID"]) # Send the vote back to the candidate
+
+
+            # if self.votedFor is None and data["term"] == self.currentTerm:
 
 
         @self.app.route("/candidate-recv-votes", methods=["POST"])
@@ -128,6 +195,10 @@ class RaftNode:
 
             data = request.json
             self.myVotes.append(data["voter"])
+
+
+
+
 
 
     def request_vote_handler(self, candidateID):
@@ -187,6 +258,11 @@ class RaftNode:
                             "candidateID": f"{self.host}:{self.port}",
                             "term": self.currentTerm  
                           })
+            
+        # Reset the election timer
+        self.reset_election_timer()
+            
+
 
 
     def candidate_loop(self):
@@ -208,20 +284,25 @@ class RaftNode:
         # a. A majority vote, change state to leader and return to running_loop
         # b. Or appendEntries from a server (claiming to be leader) that has a term atleast as large as
         #      This candidate's term, this node will recognize the leader and return to follower state
-        # c. a stalemate, new term new elecetion
+        # c. a stalemate, new term, new elecetion
 
         
-            #  case a.
+        #  case a.
         if len(self.myVotes) >= (self.cluster_size // 2) + 1:
             self.state = RaftStates.LEADER
             self.leader = f"{self.host}:{self.port}"
             return
 
-            #  case b.
+        #  case b.
 
 
 
-            #  case c.
+        #  case c.
+        if time.time() - self.last_heartbeat > self.timeout_ms:
+            self.become_candidate()
+
+        
+        
 
 
     def leader_loop(self):

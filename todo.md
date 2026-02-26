@@ -51,3 +51,7 @@ Election:
 
     1. Begynn med selve leader election.
     2. Append entries.
+
+
+
+Problemet er at kandidat raft nodene rejecter den nye lederen siden den har en lavere term en kandidatene, sjekk opp om dette
