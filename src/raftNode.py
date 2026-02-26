@@ -92,7 +92,8 @@ class RaftNode:
                 "VotedFor": self.votedFor,
                 "term": self.currentTerm,
                 "ID": f"{self.host}:{self.port}",
-                "state": self.state.value
+                "state": self.state.value,
+                "alive": self.alive
             })
         
 
@@ -113,6 +114,7 @@ class RaftNode:
             
             if state == 1:
                 self.state = RaftStates.FOLLOWER
+                self.myVotes = []
 
             elif state == 2:
                 self.state = RaftStates.CANDIDATE
@@ -162,6 +164,9 @@ class RaftNode:
         @self.app.route("/raft-appendEntries", methods=["POST"])
         def appendEntries():
 
+            if self.alive == False:
+                return
+
             # Receive data from the leader
             data = request.json
             self.handle_append_entries(data)
@@ -172,43 +177,37 @@ class RaftNode:
 
         @self.app.route("/requestVote", methods=["POST"])
         def send_vote():
-            if self.votedFor is not None:
+
+            if self.alive == False:
                 return
 
             data = request.json
+            candidateID = data["candidateID"]
 
             # newer term -> reset the vote
             if data["term"] > self.currentTerm:
                 self.currentTerm = data["term"] # Update this node's term
-                # self.votedFor = None # Stemme resetter ved nytt term
                 self.state = RaftStates.FOLLOWER
-                self.votedFor = data["candidateID"] # addressen til candidate. Stem på den nye kandidaten
-                self.request_vote_handler(data["candidateID"]) # Send the vote back to the candidate
+                self.votedFor = candidateID # addressen til candidate. Stem på den nye kandidaten
+                self.myVotes = []
 
-
-            # if self.votedFor is None and data["term"] == self.currentTerm:
+                # Send ack back to the candidate, yes i voted for you
+                url = f"http://{candidateID}/candidate-recv-votes"
+                requests.post(url=url, json={
+                    "voter": f"{self.host}:{self.port}"
+                })
 
 
         @self.app.route("/candidate-recv-votes", methods=["POST"])
         def recv_vote():
             '''Endpoint for the candidate to receive votes from followers'''
 
+            if self.alive == False:
+                return
+
             data = request.json
             self.myVotes.append(data["voter"])
 
-
-
-
-
-
-    def request_vote_handler(self, candidateID):
-        '''Here the follower sends its vote back to the candidate'''
-
-        url = f"http://{candidateID}/candidate-recv-votes"
-
-        requests.post(url=url, json={
-            "voter": f"{self.host}:{self.port}"
-        })
 
 
     def handle_append_entries(self, data):
@@ -222,6 +221,7 @@ class RaftNode:
             self.leader = data["leaderId"]
             self.currentTerm = term
             self.state = RaftStates.FOLLOWER
+            self.myVotes = []
             self.reset_election_timer()
 
 
@@ -297,7 +297,7 @@ class RaftNode:
 
 
 
-        #  case c.
+        #  case c. # Sjekk om timeout'en her blir riktig, for det tror jeg ikke
         if time.time() - self.last_heartbeat > self.timeout_ms:
             self.become_candidate()
 
@@ -326,6 +326,11 @@ class RaftNode:
 
         def run():
             while True:
+
+                # If the node is simulated crashed continue to next iteration
+                if self.alive == False:
+                    continue;
+
                 if self.state == RaftStates.FOLLOWER:
                     self.follower_loop()
 

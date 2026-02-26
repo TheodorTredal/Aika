@@ -56,6 +56,7 @@ def build_table(nodes, tick):
     table.add_column("Term")
     table.add_column("Voted For")
     table.add_column("Votes")
+    table.add_column("Sim Alive")
 
     for node in nodes:
         try:
@@ -71,10 +72,11 @@ def build_table(nodes, tick):
                 str(data["term"]),
                 str(data["VotedFor"]),
                 str(data["myVotes"]),
+                str(data["alive"]),
             )
 
         except Exception:
-            table.add_row(node, "DOWN", "-", "-", "-", str(tick))
+            table.add_row(node, "DOWN", "-", "-", "-", "DEAD")
 
     return table
 
