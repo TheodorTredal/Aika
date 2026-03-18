@@ -40,7 +40,7 @@ class RaftNode:
         self.matchIndex = [] # Index of highes log entry known to be replicated on server (inited to 0, increases monotonically)
 
         self.last_heartbeat = time.time()
-        self.timeout_ms = random.uniform(0.150, 0.600) # asumes that no two raft node has the same timeout 
+        self.timeout_ms = random.uniform(2.300, 4.600) # asumes that no two raft node has the same timeout 
 
 
         # Cluster addresses
@@ -193,35 +193,63 @@ class RaftNode:
             }, 200
         
 
+        # @self.app.route("/requestVote", methods=["POST"])
+        # def send_vote():
+
+        #     if self.alive == False:
+        #         return
+
+        #     data = request.json
+        #     candidateID = data["candidateID"]
+
+        #     if data["term"] < self.currentTerm:
+        #         return {
+        #             "success": False
+        #         }, 200
+            
+        #     if data["term"] >= self.currentTerm:
+        #         self.votedFor = None
+        #         self.myVotes = []
+
+
+        #     if self.votedFor is None:
+        #         self.currentTerm = data["term"] # Update this node's term
+        #         self.state = RaftStates.FOLLOWER
+        #         self.votedFor = candidateID # addressen til candidate. Stem på den nye kandidaten
+        #         self.myVotes = []
+
+        #         return {
+        #             "success": True
+        #         }, 200
+            
         @self.app.route("/requestVote", methods=["POST"])
         def send_vote():
-
-            if self.alive == False:
-                return
-
+            if not self.alive:
+                return jsonify({"success": False}), 503
+        
             data = request.json
-            candidateID = data["candidateID"]
-
-            if data["term"] < self.currentTerm:
-                return {
-                    "success": False
-                }, 200
-            
-            if data["term"] >= self.currentTerm:
+            term = data.get("term")
+        
+            # Hvis kandidaten har nyere term, oppdater deg selv
+            if term > self.currentTerm:
+                self.currentTerm = term
                 self.votedFor = None
-                self.myVotes = []
-
-
-            if self.votedFor is None:
-                self.currentTerm = data["term"] # Update this node's term
                 self.state = RaftStates.FOLLOWER
-                self.votedFor = candidateID # addressen til candidate. Stem på den nye kandidaten
-                self.myVotes = []
+        
+            if term < self.currentTerm:
+                return jsonify({"success": False, "term": self.currentTerm}), 200
+        
+            if self.votedFor is None or self.votedFor == data["candidateID"]:
+                self.votedFor = data["candidateID"]
+                self.reset_election_timer() # Viktig: Ikke start valg selv hvis du nettopp stemte!
+                return jsonify({"success": True, "term": self.currentTerm}), 200
+        
+            return jsonify({"success": False, "term": self.currentTerm}), 200
 
-                return {
-                    "success": True
-                }, 200
-            
+
+
+
+
         @self.app.route("/check-life-status", methods=["POST"])
         def life_status():
 
@@ -238,7 +266,7 @@ class RaftNode:
 
     def reset_election_timer(self):
         self.last_heartbeat = time.time()
-        self.timeout_ms = random.uniform(0.150, 0.600)
+        self.timeout_ms = random.uniform(2.300, 4.600)
 
 
     def follower_loop(self):
@@ -252,34 +280,40 @@ class RaftNode:
             self.become_candidate()
 
 
+
     def become_candidate(self):
-        '''Sets status to candidate, sends out requestVote to every other server'''
-
         self.state = RaftStates.CANDIDATE
-        self.currentTerm += 1 # Increment the term
-        self.votedFor = f"{self.host}:{self.port}" # Register that this node has voted this term
-        self.myVotes = [f"{self.host}:{self.port}"] # Votes for itself
+        self.currentTerm += 1
+        self.votedFor = f"{self.host}:{self.port}"
+        self.myVotes = [f"{self.host}:{self.port}"]
+        self.reset_election_timer() # Reset her så vi har tid på oss
 
-
-        for node_addr in self.otherRaftNodes:
-            url = f"http://{node_addr}/requestVote"
+        def ask_for_vote(node_addr):
             try:
-                respone = requests.post(url=url, json={
-                                "candidateID": f"{self.host}:{self.port}",
-                                "term": self.currentTerm
-                              })
-                
-                data = respone.json()
+                # Sett en kort timeout på selve nettverkskallet
+                response = requests.post(f"http://{node_addr}/requestVote", json={
+                    "candidateID": f"{self.host}:{self.port}",
+                    "term": self.currentTerm
+                }, timeout=0.1) 
 
-                if data["success"]:
-                    self.myVotes.append(node_addr)
-            
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("success"):
+                        # Bruk en lock hvis du vil være helt trygg, 
+                        # men i Python er list.append() stort sett thread-safe
+                        if node_addr not in self.myVotes:
+                            self.myVotes.append(node_addr)
             except:
                 pass
 
+        # Start en tråd for hver node i stedet for en blokkerende for-løkke
+        for node_addr in self.otherRaftNodes:
+            threading.Thread(target=ask_for_vote, args=(node_addr,), daemon=True).start()
 
-        # Reset the election timer
         self.reset_election_timer()
+
+
+    
             
 
     def candidate_loop(self):
