@@ -146,9 +146,13 @@ class RaftNode:
 
             if  alive == 0:
                 self.alive = False
+                self.myVotes = []
+                self.votedFor = None
 
             elif alive == 1:
                 self.alive = True
+                self.myVotes = []
+                self.votedFor = None
 
             else:
                 return {"400": "Bad Request"}
@@ -169,10 +173,24 @@ class RaftNode:
 
             # Receive data from the leader
             data = request.json
-            self.handle_append_entries(data)
+
+            if data["term"] < self.currentTerm:
+                return {
+                    "success" : False,
+                    "term": self.currentTerm
+                }, 200
+
+            self.leader = data["leaderId"]
+            self.currentTerm = data["term"]
+            self.state = RaftStates.FOLLOWER
+            self.myVotes = []
+            self.votedFor = data["leaderId"]
+            self.reset_election_timer()
 
             # Send ACK tilbake til lederen
-            return {"success": True}, 200
+            return {
+                "success": True
+            }, 200
         
 
         @self.app.route("/requestVote", methods=["POST"])
@@ -184,49 +202,43 @@ class RaftNode:
             data = request.json
             candidateID = data["candidateID"]
 
-            # newer term -> reset the vote
-            if data["term"] > self.currentTerm:
+            if data["term"] < self.currentTerm:
+                return {
+                    "success": False
+                }, 200
+            
+            if data["term"] >= self.currentTerm:
+                self.votedFor = None
+                self.myVotes = []
+
+
+            if self.votedFor is None:
                 self.currentTerm = data["term"] # Update this node's term
                 self.state = RaftStates.FOLLOWER
                 self.votedFor = candidateID # addressen til candidate. Stem på den nye kandidaten
                 self.myVotes = []
 
-                # Send ack back to the candidate, yes i voted for you
-                url = f"http://{candidateID}/candidate-recv-votes"
-                requests.post(url=url, json={
-                    "voter": f"{self.host}:{self.port}"
-                })
+                return {
+                    "success": True
+                }, 200
+            
+        @self.app.route("/check-life-status", methods=["POST"])
+        def life_status():
 
+            if self.alive is True:
+                return {
+                    "alive": True,
+                }, 200
 
-        @self.app.route("/candidate-recv-votes", methods=["POST"])
-        def recv_vote():
-            '''Endpoint for the candidate to receive votes from followers'''
-
-            if self.alive == False:
-                return
-
-            data = request.json
-            self.myVotes.append(data["voter"])
-
-
-
-    def handle_append_entries(self, data):
-        '''The leader will post some data, and the follower will reset it's
-            timer
-        '''
-
-        term = data["term"]
-
-        if term >= self.currentTerm:
-            self.leader = data["leaderId"]
-            self.currentTerm = term
-            self.state = RaftStates.FOLLOWER
-            self.myVotes = []
-            self.reset_election_timer()
+            else: 
+                return {
+                    "alive": False
+                }, 503
 
 
     def reset_election_timer(self):
         self.last_heartbeat = time.time()
+        self.timeout_ms = random.uniform(0.150, 0.600)
 
 
     def follower_loop(self):
@@ -244,26 +256,31 @@ class RaftNode:
         '''Sets status to candidate, sends out requestVote to every other server'''
 
         self.state = RaftStates.CANDIDATE
-
         self.currentTerm += 1 # Increment the term
-
-        if self.votedFor is None:
-            self.votedFor = f"{self.host}:{self.port}" # Register this raft node's vote
-            self.myVotes.append(f"{self.host}:{self.port}") # Vote for myself
+        self.votedFor = f"{self.host}:{self.port}" # Register that this node has voted this term
+        self.myVotes = [f"{self.host}:{self.port}"] # Votes for itself
 
 
         for node_addr in self.otherRaftNodes:
             url = f"http://{node_addr}/requestVote"
-            requests.post(url=url, json={
-                            "candidateID": f"{self.host}:{self.port}",
-                            "term": self.currentTerm  
-                          })
+            try:
+                respone = requests.post(url=url, json={
+                                "candidateID": f"{self.host}:{self.port}",
+                                "term": self.currentTerm
+                              })
+                
+                data = respone.json()
+
+                if data["success"]:
+                    self.myVotes.append(node_addr)
             
+            except:
+                pass
+
+
         # Reset the election timer
         self.reset_election_timer()
             
-
-
 
     def candidate_loop(self):
         '''If the RAFT node gets the majority of the votes, 
@@ -273,20 +290,6 @@ class RaftNode:
             Får kandidat noden n / 2 + 1 stemme så vinner den og blir leader
         '''
 
-
-        # Send voting request to other raft nodes.
-
-            
-        # cluster_size = len(self.otherRaftNodes) + 1
-
-        # After sending requestVote Put the candidate node in a waiting state, 
-        # waiting for either
-        # a. A majority vote, change state to leader and return to running_loop
-        # b. Or appendEntries from a server (claiming to be leader) that has a term atleast as large as
-        #      This candidate's term, this node will recognize the leader and return to follower state
-        # c. a stalemate, new term, new elecetion
-
-        
         #  case a.
         if len(self.myVotes) >= (self.cluster_size // 2) + 1:
             self.state = RaftStates.LEADER
@@ -303,6 +306,11 @@ class RaftNode:
 
         
         
+    def become_follower(self, new_term):
+        self.state = RaftStates.FOLLOWER
+        self.myVotes = []
+        self.votedFor = None
+        self.currentTerm = new_term
 
 
     def leader_loop(self):
@@ -310,11 +318,21 @@ class RaftNode:
         # Send out heartbeats to all followers
         for node_addr in self.otherRaftNodes:
             url = f"http://{node_addr}/raft-appendEntries"
-            requests.post(url, json={
-                "term": self.currentTerm,
-                "leaderId": f"{self.host}:{self.port}",
-                "entries": []
-            })
+            try:
+                response = requests.post(url, json={
+                    "term": self.currentTerm,
+                    "leaderId": f"{self.host}:{self.port}",
+                    "entries": []
+                })
+
+                data = response.json()
+
+                if data["success"] == False:
+                    self.become_follower(data["term"])
+
+
+            except:
+                pass
 
         time.sleep(0.05) # 50 ms heartbeat
 

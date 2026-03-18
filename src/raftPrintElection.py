@@ -56,7 +56,8 @@ def build_table(nodes, tick):
     table.add_column("Term")
     table.add_column("Voted For")
     table.add_column("Votes")
-    table.add_column("Sim Alive")
+
+    node_status = ""
 
     for node in nodes:
         try:
@@ -66,17 +67,21 @@ def build_table(nodes, tick):
             )
             data = r.json()
 
+            if data["alive"] == False:
+                node_status = "DEAD"
+            else:
+                node_status = data["state"]
+
             table.add_row(
                 data["server_id"],
-                data["state"],
+                node_status,
                 str(data["term"]),
                 str(data["VotedFor"]),
                 str(data["myVotes"]),
-                str(data["alive"]),
             )
 
         except Exception:
-            table.add_row(node, "DOWN", "-", "-", "-", "DEAD")
+            table.add_row(node, "DEAD", "-", "-", "-")
 
     return table
 
