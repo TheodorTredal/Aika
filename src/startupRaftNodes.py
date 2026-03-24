@@ -1,5 +1,5 @@
 import sys
-from raftNode import RaftNode
+from raftNode2 import RaftNode2
 
 def main():
     '''Startup for all the Raft nodes, each node gets their own host + port, including a list of other RAFT nodes'''
@@ -21,7 +21,7 @@ def main():
                     otherRaftNodes.append(node_addr.strip().replace("/", ""))
 
 
-    thisRaftNode = RaftNode(host=host, port=port, otherRaftNodes=otherRaftNodes)
+    thisRaftNode = RaftNode2(host=host, port=port, otherRaftNodes=otherRaftNodes)
     thisRaftNode.running_loop()
     thisRaftNode.init()
 

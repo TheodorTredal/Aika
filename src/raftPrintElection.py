@@ -77,7 +77,7 @@ def build_table(nodes, tick):
                 node_status,
                 str(data["term"]),
                 str(data["VotedFor"]),
-                str(data["myVotes"]),
+                str(data["votesRecived"]),
             )
 
         except Exception:

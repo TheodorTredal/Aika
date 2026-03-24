@@ -153,6 +153,7 @@ class RaftNode:
                 self.alive = True
                 self.myVotes = []
                 self.votedFor = None
+                self.state = RaftStates.FOLLOWER
 
             else:
                 return {"400": "Bad Request"}
@@ -193,34 +194,6 @@ class RaftNode:
             }, 200
         
 
-        # @self.app.route("/requestVote", methods=["POST"])
-        # def send_vote():
-
-        #     if self.alive == False:
-        #         return
-
-        #     data = request.json
-        #     candidateID = data["candidateID"]
-
-        #     if data["term"] < self.currentTerm:
-        #         return {
-        #             "success": False
-        #         }, 200
-            
-        #     if data["term"] >= self.currentTerm:
-        #         self.votedFor = None
-        #         self.myVotes = []
-
-
-        #     if self.votedFor is None:
-        #         self.currentTerm = data["term"] # Update this node's term
-        #         self.state = RaftStates.FOLLOWER
-        #         self.votedFor = candidateID # addressen til candidate. Stem på den nye kandidaten
-        #         self.myVotes = []
-
-        #         return {
-        #             "success": True
-        #         }, 200
             
         @self.app.route("/requestVote", methods=["POST"])
         def send_vote():
@@ -262,6 +235,24 @@ class RaftNode:
                 return {
                     "alive": False
                 }, 503
+            
+
+        @self.app.route("append-log-to-raft", methods=["POST"])
+        def append_log_to_raft():
+            '''
+                Endepunkt for å ta i mot log fra monitorene, skriver data til lokal fil og sender loggen til de andre raft nodene.
+            '''
+
+            pass
+
+
+        @self.app.route("initiate-replication", methods=["POST"])
+        def initiate_replication():
+            '''
+                Hvis monitor ikke har sendt log etter x antall sekunder så skal man starte replikeringsprosessen
+            '''
+
+            pass
 
 
     def reset_election_timer(self):
