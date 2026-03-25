@@ -177,8 +177,11 @@ class RaftNode2:
 
             data = request.json
             leader_term = data.get("term")
+            prev_log_index = data.get("revLogIndex", -1)
+            prev_log_term = data.get("prevLogTerm", -1)
             leader_id = data.get("leaderId")
             entries = data.get("entries", [])
+            leader_commit = data.get("leaderCommit", 0)
 
             with self.lock:
                 # Check the leader's term is outdated
@@ -189,11 +192,31 @@ class RaftNode2:
                     }), 200
 
                 self.currentTerm = leader_term
+                self.leader = leader_id
                 self.state = RaftStates.FOLLOWER
-                # self.votedFor = None # Election is over for this term
 
                 # Valid leader, reset the election timer
                 self.reset_election_timer()
+
+                # Consistency check, do we have prev_log_index with correct term?
+                if prev_log_index >= 0:
+                    if prev_log_index >= len(self.log) or self.lof[prev_log_index]["term"] != prev_log_term:
+                        return jsonify({"term": self.currentTerm, "success": False}), 200
+
+                # Append new entries (overwrite in case of conflict)
+                for i, entry in enumerate(entries):
+                    index = prev_log_index + 1 + i
+                    if index < len(self.log):
+                        if self.log[index]["term"] != entry["term"]:
+                            self.log = self.log[:index] # Remove log conflict
+                            self.log.append(entry)
+
+                    else:
+                        self.log.append(entry)
+
+                # Update commitIndex
+                if leader_commit > self.commitIndex:
+                    self.commitIndex = min(leader_commit, len(self.log) - 1)
 
                 # success = self.verify_log_consistency(data)
 
@@ -231,6 +254,40 @@ class RaftNode2:
                     return  jsonify({"term": self.currentTerm, "grantVote": True})
 
                 return  jsonify({"term": self.currentTerm, "grantVote": False})
+
+
+        @self.app.route("/client-request", methods=["POST"])
+        def client_request():
+            '''Endpoint for client to '''
+
+            data = request.json
+
+            with self.lock:
+                if self.state == RaftStates.LEADER:
+                    return self.process_client_command(data)
+            
+                # Redirect client request to leader
+                elif self.leader is not None:
+                    try:
+                        response = requests.post(f"http://{self.leader}/execute", json=data, timeout=1.0)
+                        return (response.content, response.status_code, response.headers.items())
+                    except Exception:
+                        return jsonify({"error": "Leader unreachable"}), 503
+
+                else:
+                    return jsonify({"error": "Leader unknown, try again later"}), 503
+
+
+    def process_client_command(self, data):
+
+        with self.lock:
+            entry = {"term": self.currentTerm, "command": data}
+            self.log.append(entry)
+
+            self.lastLogIndex = len(self.log) - 1
+            self.lastLogTerm = entry["term"]
+
+        return jsonify({"status": "success", "index": self.lastLogIndex}), 200
 
 
     def reset_election_timer(self):
@@ -274,39 +331,6 @@ class RaftNode2:
             ]
 
 
-    # def send_request_vote(self, node_addr):
-    #     try:
-    #         payload = {
-    #             "term": self.currentTerm,
-    #             "candidateID": self.address,
-    #             "lastLogIndex": self.lastLogIndex,
-    #             "lastLogTerm": self.lastLogTerm
-    #         }
-
-    #         response = requests.post(f"http://{node_addr}/requestVote", json=payload, timeout=0.5)
-
-    #         if response.status_code == 200:
-    #             data = response.json()
-    #             voter_term = data.get("term")
-    #             vote_granted = data.get("grantVote")
-
-    #             with self.lock:
-    #                 # If we receive a higher term, abort election, become follower
-    #                 if voter_term > self.currentTerm:
-    #                     self.currentTerm = voter_term
-    #                     self.state = RaftStates.FOLLOWER
-    #                     return
-
-    #                 # Count the vote if we still are a candidate
-    #                 if self.state == RaftStates.CANDIDATE and vote_granted:
-    #                     self.votesRecived += 1
-
-    #                     majority = (len(self.otherRaftNodes) // 2) + 1
-    #                     if self.votesRecived >= majority:
-    #                         self.become_leader()
-
-    #     except Exception as e:
-    #         print(f"Error when contacting node {node_addr}: {e}")
 
     def send_request_vote(self, node_addr):
         try:
@@ -356,6 +380,10 @@ class RaftNode2:
     def become_leader(self):
 
         self.state = RaftStates.LEADER
+
+        self.nextIndex = {node: len(self.log) for node in self.otherRaftNodes}
+        self.matchIndex = {node: -1 for node in self.otherRaftNodes}
+
         threading.Thread(target=self.heartbeat_loop, daemon=True).start()
 
 
