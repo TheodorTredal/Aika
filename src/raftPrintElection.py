@@ -7,6 +7,8 @@ import requests
 import time
 import os
 from rich.console import Console
+from rich.console import Group
+from rich.panel import Panel
 from rich.table import Table
 from rich.live import Live
 
@@ -86,6 +88,78 @@ def build_table(nodes, tick):
     return table
 
 
+def build_log(node_data_list):
+    matrix = Table(title="Raft replicated logs", border_style="white")
+
+    max_log_size = 0
+    for data in node_data_list:
+        if data and "log" in data:
+            max_log_size = max(max_log_size, len(data["log"]))
+
+    start_row = max(0, max_log_size - 10)
+
+    # Add a column for each node
+    matrix.add_column("index", style="dim", width=5)
+    for data in node_data_list:
+        name = data.get("server_id", "Unknown")
+        matrix.add_column(name, justify="center")
+
+    # Fill inn rows
+    for i in range(start_row, max_log_size):
+        row_cells = [f"#{i}"]
+        for data in node_data_list:
+            log = data.get("log", [])
+            if i < len(log):
+                entry = log[i]
+                term = entry.get("term", "?")
+                cmd = entry.get("command", "?")
+                style = "green" if i <= data.get("commitIndex", -1) else "white"
+                row_cells.append(f"[{style}]T{term}: {cmd}[/]")
+            else:
+                row_cells.append("[dim]-[/]")
+        matrix.add_row(*row_cells)
+
+    return matrix
+
+
+def get_all_data(nodes):
+    results = []
+
+    for node in nodes:
+        try:
+            r = requests.get(f"http://{node}/raft-myVote", timeout=0.5)
+            results.append(r.json())
+        except:
+            results.append({"server_id": node, "alive": False, "log": [], "state": "DEAD"})
+    
+    return results
+
+
+def update_display(nodes, tick):
+    all_node_data = get_all_data(nodes)
+
+    # Tabell 1: Oversikt
+    overview_table = Table(title=f"RAFT CLUSTER STATUS — Tick {tick}")
+    overview_table.add_column("Server")
+    overview_table.add_column("State")
+    overview_table.add_column("Term")
+    overview_table.add_column("CommitIdx")
+
+    for data in all_node_data:
+        overview_table.add_row(
+            data["server_id"],
+            data["state"],
+            str(data.get("term", "-")),
+            str(data.get("commitIndex", "-"))
+        )
+
+    log_matrix = build_log(all_node_data)
+
+    return Group(overview_table, log_matrix)
+
+
+
+
 def show_raft_grid():
     path = "../data/activehostport.txt"
 
@@ -94,13 +168,17 @@ def show_raft_grid():
 
     tick = 0
 
-    with Live(build_table(nodes, tick),
+    # with Live(build_table(nodes, tick),
+    #           console=console,
+    #           refresh_per_second=2) as live:
+
+    with Live(update_display(nodes, tick),
               console=console,
               refresh_per_second=2) as live:
 
         while True:
             tick += 1
-            live.update(build_table(nodes, tick))
+            live.update(update_display(nodes, tick))
             time.sleep(3)  # halve sekund mellom oppdateringer
 
 

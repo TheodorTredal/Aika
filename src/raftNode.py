@@ -93,7 +93,9 @@ class RaftNode:
                 "term": self.currentTerm,
                 "ID": f"{self.host}:{self.port}",
                 "state": self.state.value,
-                "alive": self.alive
+                "alive": self.alive,
+                "log": self.log,
+                "commitIndex": self.commitIndex
             })
         
 

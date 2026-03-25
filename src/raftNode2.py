@@ -39,8 +39,8 @@ class RaftNode2:
         self.lastApplied = 0 # Index of highest log entry applied to state machine (init to 0, increases monotonically)
 
         # Volatile state on leaders (Reinitialized after election)
-        self.nextIndex = [] # Index of the next log entry to send to that server (init to leader last log index + 1)
-        self.matchIndex = [] # Index of highes log entry known to be replicated on server (inited to 0, increases monotonically)
+        self.nextIndex = {} # Index of the next log entry to send to that server (init to leader last log index + 1)
+        self.matchIndex = {} # Index of highes log entry known to be replicated on server (inited to 0, increases monotonically)
 
         self.lastLogIndex = 0
         self.lastLogTerm = 0
@@ -99,7 +99,9 @@ class RaftNode2:
                 "term": self.currentTerm,
                 "ID": f"{self.host}:{self.port}",
                 "state": self.state.value,
-                "alive": self.alive
+                "alive": self.alive,
+                "log": self.log,
+                "commitIndex": self.commitIndex
             })
         
 
@@ -177,7 +179,7 @@ class RaftNode2:
 
             data = request.json
             leader_term = data.get("term")
-            prev_log_index = data.get("revLogIndex", -1)
+            prev_log_index = data.get("prevLogIndex", -1)
             prev_log_term = data.get("prevLogTerm", -1)
             leader_id = data.get("leaderId")
             entries = data.get("entries", [])
@@ -200,7 +202,7 @@ class RaftNode2:
 
                 # Consistency check, do we have prev_log_index with correct term?
                 if prev_log_index >= 0:
-                    if prev_log_index >= len(self.log) or self.lof[prev_log_index]["term"] != prev_log_term:
+                    if prev_log_index >= len(self.log) or self.log[prev_log_index]["term"] != prev_log_term:
                         return jsonify({"term": self.currentTerm, "success": False}), 200
 
                 # Append new entries (overwrite in case of conflict)
@@ -218,15 +220,10 @@ class RaftNode2:
                 if leader_commit > self.commitIndex:
                     self.commitIndex = min(leader_commit, len(self.log) - 1)
 
-                # success = self.verify_log_consistency(data)
-
                 return jsonify({
                     "term": self.currentTerm,
                     "success": True
                 }), 200
-
-
-
 
             
         @self.app.route("/requestVote", methods=["POST"])
@@ -256,7 +253,7 @@ class RaftNode2:
                 return  jsonify({"term": self.currentTerm, "grantVote": False})
 
 
-        @self.app.route("/client-request", methods=["POST"])
+        @self.app.route("/execute", methods=["POST"])
         def client_request():
             '''Endpoint for client to '''
 
@@ -280,12 +277,11 @@ class RaftNode2:
 
     def process_client_command(self, data):
 
-        with self.lock:
-            entry = {"term": self.currentTerm, "command": data}
-            self.log.append(entry)
 
-            self.lastLogIndex = len(self.log) - 1
-            self.lastLogTerm = entry["term"]
+        entry = {"term": self.currentTerm, "command": data}
+        self.log.append(entry)
+        self.lastLogIndex = len(self.log) - 1
+        self.lastLogTerm = entry["term"]
 
         return jsonify({"status": "success", "index": self.lastLogIndex}), 200
 
@@ -411,21 +407,29 @@ class RaftNode2:
                 time.sleep(0.05)
 
     def send_heartbeat(self, node_addr, term, commit_index):
-        try:
-            payload = {
-                "term": term,
-                "leaderId": self.address,
-                "prevLogIndex": self.lastLogIndex,
-                "prevLogTerm": self.lastLogTerm,
-                "entries": [],
-                "leaderCommit": commit_index
-            }
+        
+        with self.lock:
+            prev_idx = self.nextIndex[node_addr] - 1
+            prev_term = self.log[prev_idx]["term"] if prev_idx >= 0 else -1
+            # fetch all entries from nextIndex
+            entries_to_send = self.log[self.nextIndex[node_addr]:]
+        
+        payload = {
+            "term": term,
+            "leaderId": self.address,
+            "prevLogIndex": prev_idx,
+            "prevLogTerm": prev_term,
+            "entries": entries_to_send,
+            "leaderCommit": commit_index
+        }
 
+        try:
             response = requests.post(f"http://{node_addr}/appendEntries", json=payload, timeout=0.2)
 
             if response.status_code == 200:
                 data = response.json()
                 follower_term = data.get("term")
+                success = data.get("success")
 
                 with self.lock:
                     if follower_term > self.currentTerm:
@@ -434,9 +438,31 @@ class RaftNode2:
                         self.votedFor = None
                         self.reset_election_timer()
 
+                    if success:
+                        self.matchIndex[node_addr] = prev_idx + len(entries_to_send)
+                        self.nextIndex[node_addr] = self.matchIndex[node_addr] + 1
+                        self.update_commit_index()
+                    else:
+                        # Consistency error, go one step back in the log and try next heartbeat
+                        self.nextIndex[node_addr] = max(0, self.nextIndex[node_addr] - 1)
+
+
+
         except Exception as e:
             pass
 
+    def update_commit_index(self):
+        
+        for n in range(len(self.log) - 1, self.commitIndex, -1):
+            if self.log[n]["term"] == self.currentTerm:
+                count = 1
+                for node in self.otherRaftNodes:
+                    if self.matchIndex[node] >= n:
+                        count += 1
+
+                if count >= (self.cluster_size // 2) + 1:
+                    self.commitIndex = n
+                    break
 
     def candidate_loop(self):
         if time.time() - self.last_heartbeat > self.timeout_ms:
