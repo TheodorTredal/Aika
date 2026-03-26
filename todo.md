@@ -55,3 +55,18 @@ Election:
 
 
 Problemet er at kandidat raft nodene rejecter den nye lederen siden den har en lavere term en kandidatene, sjekk opp om dette
+
+
+
+
+1. holde en liste over alle local controllersene (kanskje agentene)
+2. ha executable filen / filstien for å restarte filene
+3. ha et startup skript for raft + Iver aika
+4. legge opp et API for heartbeats
+5. Legge til addressen til 
+
+
+
+FAKTISK DØD: ssh ttr042@c7-24 "pkill -9 -f inf3203_startupRaftNodes"
+
+ssh USER@c7-24 "pkill -9 -f inf3203_startupRaftNodes"

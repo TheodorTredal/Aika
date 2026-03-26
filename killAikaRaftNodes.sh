@@ -1,36 +1,28 @@
 #!/bin/bash
-# -----------------------------------------
-# killChord.sh – Stopp alle CHORD-noder oppført i activehostport.txt
-# -----------------------------------------
 
-ACTIVE_FILE="data/activehostport.txt"
-REMOTE_PROJECT_PATH="/mnt/users/$USER/3200-a2/src"
-FORCE=false
+# Filen der vi lagret host:port par
+HOST_FILE="data/activehostport.txt"
 
-# Bruk: ./killChord.sh [--force]
-# --force = bruk SIGKILL i stedet for SIGTERM
-
-if [[ "$1" == "--force" ]]; then
-    FORCE=true
+if [ ! -f "$HOST_FILE" ]; then
+    echo "Fant ikke $HOST_FILE. Er nodene startet?"
+    exit 1
 fi
 
+# Hent ut unike vertsnavn fra filen (kolonne 1 før kolonet)
+HOSTS=$(cut -d':' -f1 "$HOST_FILE" | sort -u)
 
-echo "Stopper alle CHORD-noder fra $ACTIVE_FILE..."
-mapfile -t NODES < "$ACTIVE_FILE"
+echo "Starter opprydding på følgende noder..."
 
-for NODE in "${NODES[@]}"; do
-    HOST=$(echo "$NODE" | cut -d':' -f1)
-    PORT=$(echo "$NODE" | cut -d':' -f2)
-
-    echo "Stopper node på $HOST:$PORT ..."
-
-    if [[ "$FORCE" == true ]]; then
-        # Hard kill med -9
-        ssh -n "$USER@$HOST" "ps -ef | grep 'python3 startChordNode.py $HOST $PORT' | grep -v grep | awk '{print \$2}' | xargs -r kill -9" >/dev/null 2>&1
+for HOST in $HOSTS; do
+    echo "Sletter prosesser på $HOST..."
+    # -f gjør at pkill leter i hele kommandolinjen, ikke bare prosessnavnet
+    ssh -n "$USER@$HOST" "pkill -9 -f inf3203_startupRaftNodes" 2>/dev/null
+    
+    if [ $? -eq 0 ]; then
+        echo "  [OK] Prosesser drept på $HOST"
     else
-        # Myk kill (SIGTERM)
-        ssh -n "$USER@$HOST" "ps -ef | grep 'python3 startChordNode.py $HOST $PORT' | grep -v grep | awk '{print \$2}' | xargs -r kill" >/dev/null 2>&1
+        echo "  [INFO] Ingen aktive prosesser funnet på $HOST"
     fi
-
-    echo "Node $HOST:$PORT stoppet (hvis den kjørte)"
 done
+
+echo "Opprydding ferdig."

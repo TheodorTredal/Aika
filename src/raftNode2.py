@@ -94,8 +94,8 @@ class RaftNode2:
         def raft_my_vote_info():
             return jsonify({
                 "server_id": f"{self.address}",
-                "votesRecived": self.votesRecived,
-                "VotedFor": self.votedFor,
+                "votesRecieved": self.votesRecived,
+                "votedFor": self.votedFor,
                 "term": self.currentTerm,
                 "ID": f"{self.host}:{self.port}",
                 "state": self.state.value,
@@ -149,7 +149,6 @@ class RaftNode2:
             How to use "curl -X POST http://c0-0:0000/raft-kill-node?alive=0"
             '''
 
-
             alive = request.args.get("alive", type=int)
 
             if  alive == 0:
@@ -176,6 +175,9 @@ class RaftNode2:
         # Lederen sender data til dette API kallet
         @self.app.route("/appendEntries", methods=["POST"])
         def handle_append_entries():
+
+            if self.alive is False:
+                return
 
             data = request.json
             leader_term = data.get("term")
@@ -229,6 +231,9 @@ class RaftNode2:
         @self.app.route("/requestVote", methods=["POST"])
         def send_vote():
 
+            if self.alive is False:
+                return
+
             data = request.json
             term = data.get("term")
             candidateID = data.get("candidateID")
@@ -256,6 +261,9 @@ class RaftNode2:
         @self.app.route("/execute", methods=["POST"])
         def client_request():
             '''Endpoint for client to '''
+
+            if self.alive is False:
+                return
 
             data = request.json
 

@@ -84,7 +84,7 @@ for NODE in "${NODES[@]}"; do
 
     ssh -n "$USER@$HOST" "
         cd $REMOTE_PROJECT_PATH &&
-        nohup python3 startupRaftNodes.py \
+        nohup python3 inf3203_startupRaftNodes.py \
             $HOST \
             $PORT \
         > node.log 2>&1 < /dev/null &
