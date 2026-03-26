@@ -10,6 +10,7 @@ def main():
 
     host = sys.argv[1]
     port = int(sys.argv[2])
+    localControllers = sys.argv[3:]
 
 
     # Fetch all other raft node addresses.
@@ -21,11 +22,15 @@ def main():
                     otherRaftNodes.append(node_addr.strip().replace("/", ""))
 
 
-    thisRaftNode = RaftNode2(host=host, port=port, otherRaftNodes=otherRaftNodes)
+    thisRaftNode = RaftNode2(
+        host=host, 
+        port=port, 
+        otherRaftNodes=otherRaftNodes, 
+        localControllers=localControllers
+        )
+    
     thisRaftNode.running_loop()
     thisRaftNode.init()
-
-
 
 
 

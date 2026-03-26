@@ -89,3 +89,8 @@ ssh USER@c7-24 "pkill -9 -f inf3203_startupRaftNodes"
 2. Vente på startup skriptet til Iver
 3. Raft noden får en liste over noder som kan være local kontrollere
 4. Raft skal bruke en python funksjon for å starte opp disse local kontrollerne.
+
+
+
+
+Trenger en liste over "OTHER RAFT NODER" og en liste over alle localControllers

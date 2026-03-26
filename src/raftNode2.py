@@ -18,9 +18,10 @@ class RaftStates(Enum):
 
 class RaftNode2:
     '''RAFT protocol is implemented as the cluster controller.'''
-    def __init__(self, host: str, port: int, otherRaftNodes: list):
+    def __init__(self, host: str, port: int, otherRaftNodes: list, localControllers: list):
 
 
+        self.localControllers: list = localControllers
         # Persistent state on all servers
         self.currentTerm = 0
         self.votedFor = None
@@ -80,7 +81,8 @@ class RaftNode2:
                 "server_id": f"{self.host}:{self.port}",
                 "votesRecived": self.votesRecived,
                 "leader": self.leader,
-                "alive": self.alive
+                "alive": self.alive,
+                "localControllers": self.localControllers
                 })
         
         @self.app.route("/raft-state-info", methods=["GET"])
