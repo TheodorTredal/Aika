@@ -455,7 +455,7 @@ class RaftNode2:
                         self.nextIndex[node_addr] = max(0, self.nextIndex[node_addr] - 1)
 
 
-
+        # If a raft node does not answer we need to try and start the raft node again via RPC
         except Exception as e:
             pass
 
