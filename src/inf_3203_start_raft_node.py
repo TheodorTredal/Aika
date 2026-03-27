@@ -1,5 +1,5 @@
 import sys
-from raftNode2 import RaftNode2
+from raft_node import RaftNode
 
 
 def main():
@@ -11,21 +11,25 @@ def main():
 
     host = sys.argv[1]
     port = int(sys.argv[2])
-    worker_nodes_file = sys.argv[3]
+    project_dir = sys.argv[3]
+
+    raft_nodes_file = project_dir + "/data/activehostport.txt"
+    worker_nodes_file = project_dir + "/data/worker_nodes.txt"
 
     # Fetch all other raft node addresses.
     otherRaftNodes = []
-    with open("../data/activehostport.txt", "r") as file:
+    with open(raft_nodes_file, "r") as file:
         for node_addr in file:
             # Do not include this node in the otherRaftNodes list
             if node_addr.strip().replace("/", "") != f"{host}:{port}":
                 otherRaftNodes.append(node_addr.strip().replace("/", ""))
 
-    thisRaftNode = RaftNode2(
+    thisRaftNode = RaftNode(
         host=host,
         port=port,
         otherRaftNodes=otherRaftNodes,
         workerNodesFile=worker_nodes_file,
+        projectPath=project_dir,
     )
     thisRaftNode.running_loop()
     thisRaftNode.init()

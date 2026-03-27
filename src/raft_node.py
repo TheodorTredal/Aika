@@ -6,6 +6,7 @@ import random
 import threading
 import os
 import json
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
 AGENTS_PER_NODE = 5
@@ -17,123 +18,19 @@ class RaftStates(Enum):
     LEADER = "leader"
 
 
-"""Må finne ut hvorfor vi har RAFT i AIKA"""
-
-
-def assign_agents(self):
-    """Called by the leader to assign agents to worker nodes and start LCs."""
-
-    INITIAL_AGENT_BINARY = "./bin/inf_3203_initial_agent"
-    WORKER_AGENT_BINARY = "./bin/inf_3203_worker_agent"
-    FINAL_AGENT_BINARY = "./bin/inf_3203_final_agent"
-    INITIAL_ADDRESS = f"{self.worker_nodes[0]}:5001"
-    FINAL_ADDRESS = f"{self.worker_nodes[-1]}:6000"
-    LC_BINARY = "./bin/inf_3203_local_controller"
-    CC_ADDRESSES = [self.address] + self.otherRaftNodes
-
-    # Build a flat list of all agent configs to distribute
-    all_agents = []
-
-    # One initial agent
-    all_agents.append(
-        {
-            "binary": INITIAL_AGENT_BINARY,
-            "flags": [
-                "-image-dir",
-                "/share/inf3203/unlabeled_images/",
-                "-wal-path",
-                "./data/wal/initial.wal",
-                "-server-address",
-                INITIAL_ADDRESS,
-                "-agent-id",
-                "initial-agent",
-                "-log-file",
-                "./data/logs/initial-agent.log",
-            ],
-        }
-    )
-
-    # One final agent
-    all_agents.append(
-        {
-            "binary": FINAL_AGENT_BINARY,
-            "flags": [
-                "-output-path",
-                "./data/result.json",
-                "-wal-path",
-                "./data/wal/final.wal",
-                "-server-address",
-                FINAL_ADDRESS,
-                "-agent-id",
-                "final-agent",
-                "-log-file",
-                "./data/logs/final-agent.log",
-            ],
-        }
-    )
-
-    # Fill the rest with worker agents
-    worker_count = (len(self.worker_nodes) * AGENTS_PER_NODE) - 2
-    for i in range(worker_count):
-        all_agents.append(
-            {
-                "binary": WORKER_AGENT_BINARY,
-                "flags": [
-                    "-ia-address",
-                    INITIAL_ADDRESS,
-                    "-fa-address",
-                    FINAL_ADDRESS,
-                    "-agent-id",
-                    f"worker-{i}",
-                    "-log-file",
-                    f"./data/logs/worker-{i}.log",
-                ],
-            }
-        )
-
-    # Split agents across nodes, 5 per node
-    for i, node in enumerate(self.worker_nodes):
-        # Is the LC already running?
-        if self.is_lc_running(node):
-            print(f"LC already running on {node}, skipping")
-            continue
-
-        node_agents = all_agents[i * AGENTS_PER_NODE : (i + 1) * AGENTS_PER_NODE]
-
-        lc_config = {"cluster_controllers": CC_ADDRESSES, "agents": node_agents}
-
-        config_path = f"./data/lc_configs/lc_{node}.json"
-        os.makedirs("./data/lc_configs", exist_ok=True)
-        with open(config_path, "w") as f:
-            json.dump(lc_config, f, indent=4)
-
-        # Copy config to node and start the LC
-        self._start_lc(node, config_path, LC_BINARY)
-        print(f"Started LC on {node}")
-
-
-def _start_lc(self, node, config_path, lc_binary):
-    """SCP the config to the node and start the local controller."""
-    remote_path = f"/mnt/users/{os.environ['USER']}/Aika"
-    remote_config = f"{remote_path}/data/lc_configs/lc_{node}.json"
-
-    os.system(f"ssh {node} 'mkdir -p {remote_path}/data/lc_configs'")
-    os.system(f"scp {config_path} {node}:{remote_config}")
-    os.system(
-        f"ssh -n {node} 'cd {remote_path} && "
-        f"nohup {lc_binary} "
-        f"--config {remote_config} "
-        f"--log-file ./data/logs/lc_{node}.log "
-        f"> ./data/logs/lc_{node}_stdout.log 2>&1 < /dev/null &'"
-    )
-
-
-class RaftNode2:
+class RaftNode:
     """RAFT protocol is implemented as the cluster controller."""
 
     def __init__(
-        self, host: str, port: int, otherRaftNodes: list, workerNodesFile: str
+        self,
+        host: str,
+        port: int,
+        otherRaftNodes: list,
+        workerNodesFile: str,
+        projectPath: str,
     ):
+        self.projectPath = projectPath
+
         # Load the worker nodes
         self.worker_nodes = []
         with open(workerNodesFile, "r") as f:
@@ -411,6 +308,100 @@ class RaftNode2:
 
                 else:
                     return jsonify({"error": "Leader unknown, try again later"}), 503
+
+    def assign_agents(self):
+        try:
+            """Called by the leader to assign agents to worker nodes and start LCs."""
+            os.makedirs(f"{self.projectPath}/data/lc_configs", exist_ok=True)
+
+            INITIAL_PORT = "36234"
+            FINAL_PORT = "35235"
+            FIRST_NODE = self.worker_nodes[0]
+            INITIAL_LISTEN = f"0.0.0.0:{INITIAL_PORT}"
+            FINAL_LISTEN = f"0.0.0.0:{FINAL_PORT}"
+            INITIAL_ADDRESS = f"{FIRST_NODE}:{INITIAL_PORT}"
+            FINAL_ADDRESS = f"{FIRST_NODE}:{FINAL_PORT}"
+
+            INITIAL_AGENT_BINARY = f"{self.projectPath}/bin/inf_3203_initial_agent"
+            WORKER_AGENT_BINARY = f"{self.projectPath}/bin/inf_3203_worker_agent"
+            FINAL_AGENT_BINARY = f"{self.projectPath}/bin/inf_3203_final_agent"
+            LC_BINARY = f"{self.projectPath}/bin/inf_3203_local_controller"
+            CC_ADDRESSES = [self.address] + self.otherRaftNodes
+
+            worker_counter = 0
+
+            print(self.worker_nodes, flush=True)
+            for i, node in enumerate(self.worker_nodes):
+                print(f"Processing node {i}: {node}", flush=True)
+                lc_running = self.is_lc_running(node)
+                print(f"LC running on {node}: {lc_running}", flush=True)
+
+                if self.is_lc_running(node):
+                    print(f"LC already running on {node}, skipping", flush=True)
+                    continue
+
+                agents = []
+
+                # First node gets the initial and final agent
+                if i == 0:
+                    agents.append({
+                        "binary": INITIAL_AGENT_BINARY,
+                        "flags": [
+                            "-image-dir", "/share/inf3203/unlabeled_images/",
+                            "-wal-path", f"{self.projectPath}/data/wal/initial.wal",
+                            "-server-address", INITIAL_LISTEN,
+                            "-agent-id", "initial-agent",
+                            "-log-file", f"{self.projectPath}/data/logs/initial-agent.log",
+                        ],
+                    })
+                    agents.append({
+                        "binary": FINAL_AGENT_BINARY,
+                        "flags": [
+                            "-output-path", f"{self.projectPath}/data/result.json",
+                            "-wal-path", f"{self.projectPath}/data/wal/final.wal",
+                            "-server-address", FINAL_LISTEN,
+                            "-agent-id", "final-agent",
+                            "-log-file", f"{self.projectPath}/data/logs/final-agent.log",
+                        ],
+                    })
+
+                # Fill remaining slots with workers
+                while len(agents) < AGENTS_PER_NODE:
+                    agents.append({
+                        "binary": WORKER_AGENT_BINARY,
+                        "flags": [
+                            "-ia-address", INITIAL_ADDRESS,
+                            "-fa-address", FINAL_ADDRESS,
+                            "-agent-id", f"worker-{worker_counter}",
+                            "-log-file", f"{self.projectPath}/data/logs/worker-{worker_counter}.log",
+                        ],
+                    })
+                    worker_counter += 1
+
+                lc_config = {"cluster_controllers": CC_ADDRESSES, "agents": agents}
+                config_path = f"{self.projectPath}/data/lc_configs/lc_{node}.json"
+                with open(config_path, "w") as f:
+                    json.dump(lc_config, f, indent=4)
+
+                print(f"Starting LC on {node}", flush=True)
+                self._start_lc(node, config_path, LC_BINARY)
+                print(f"Started LC on {node}", flush=True)
+        except Exception as e:
+            print(e, flush=True)
+
+    def _start_lc(self, node, config_path, lc_binary):
+        cmd = (
+            f"ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no {node} "
+            f"'mkdir -p {self.projectPath}/data/logs && "
+            f"nohup {lc_binary} "
+            f"--config {config_path} "
+            f"--log-file {self.projectPath}/data/logs/lc_{node}.log "
+            f"> {self.projectPath}/data/logs/lc_{node}_stdout.log 2>&1 < /dev/null &'"
+        )
+        try:
+            subprocess.run(cmd, shell=True, timeout=10)
+        except subprocess.TimeoutExpired:
+            print(f"SSH timeout starting LC on {node}", flush=True)
 
     def is_lc_running(self, node):
         """Check if a local controller is already running on a node."""

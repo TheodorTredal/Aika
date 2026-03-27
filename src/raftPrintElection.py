@@ -1,7 +1,6 @@
-'''Print all raft nodes, used for debugging purposes.'''
+"""Print all raft nodes, used for debugging purposes."""
 
-
-'''Må åpne filen hente ut alle aktive raft noder og printe deres status ved bruk av curl eller api kall eller whatever.'''
+"""Må åpne filen hente ut alle aktive raft noder og printe deres status ved bruk av curl eller api kall eller whatever."""
 
 import requests
 import time
@@ -12,17 +11,15 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.live import Live
 
+path = "../../data/activehostport.txt"
 
 
 def AllRaftNodeStatus():
-    '''USED FOR DEBUGGING, find out if the nodes are follower, leader or candidate. '''
-
-    path = "../data/activehostport.txt"
+    """USED FOR DEBUGGING, find out if the nodes are follower, leader or candidate."""
 
     last_modified = os.path.getmtime(path)
 
     with open(path, "r") as file:
-
         # Keep the script running during the RAFT protocol
         while True:
             current_mtime = os.path.getmtime(path)
@@ -36,13 +33,10 @@ def AllRaftNodeStatus():
 
             file.seek(0)
             for node_addr in file:
-                r = requests.get(
-                    f"http://{node_addr.strip()}/raft-myVote"
-                )
+                r = requests.get(f"http://{node_addr.strip()}/raft-myVote")
                 print(node_addr.strip(), "->", r.json()["state"])
 
             time.sleep(0.5)
-
 
 
 def build_log(node_data_list):
@@ -81,7 +75,7 @@ def build_log(node_data_list):
 
 console = Console()
 
-tick = 0 # global timer
+tick = 0  # global timer
 
 
 def build_table(nodes, tick):
@@ -97,10 +91,7 @@ def build_table(nodes, tick):
 
     for node in nodes:
         try:
-            r = requests.get(
-                f"http://{node}/raft-myVote",
-                timeout=1
-            )
+            r = requests.get(f"http://{node}/raft-myVote", timeout=1)
             data = r.json()
 
             if data["alive"] == False:
@@ -133,20 +124,21 @@ def get_all_data(nodes):
             results.append(data)
         except:
             # Her havner vi ved "Connection Refused" eller "Timeout"
-            results.append({
-                "server_id": node, 
-                "alive": False, 
-                "log": [], 
-                "state": "DEAD (NO SIGNAL)",
-                "term": "-",
-                "commitIndex": "-"
-            })
+            results.append(
+                {
+                    "server_id": node,
+                    "alive": False,
+                    "log": [],
+                    "state": "DEAD (NO SIGNAL)",
+                    "term": "-",
+                    "commitIndex": "-",
+                }
+            )
     return results
 
 
 def update_display(nodes, tick):
     all_node_data = get_all_data(nodes)
-
 
     # Tabell 1: Oversikt
     overview_table = Table(title=f"RAFT CLUSTER STATUS — Tick {tick}")
@@ -160,7 +152,6 @@ def update_display(nodes, tick):
     node_status = ""
 
     for data in all_node_data:
-
         if data["alive"] == False:
             node_status = "DEAD LOGICAL"
 
@@ -169,7 +160,6 @@ def update_display(nodes, tick):
 
         else:
             node_status = data["state"]
-        
 
         overview_table.add_row(
             data["server_id"],
@@ -177,7 +167,7 @@ def update_display(nodes, tick):
             str(data.get("term", "-")),
             str(data.get("commitIndex", "-")),
             str(data.get("votedFor", "-")),
-            str(data.get("votesRecieved", "-"))
+            str(data.get("votesRecieved", "-")),
         )
 
     log_matrix = build_log(all_node_data)
@@ -186,17 +176,15 @@ def update_display(nodes, tick):
 
 
 def show_raft_grid():
-    path = "../data/activehostport.txt"
 
     with open(path) as file:
         nodes = [line.strip() for line in file]
 
     tick = 0
 
-    with Live(update_display(nodes, tick),
-              console=console,
-              refresh_per_second=2) as live:
-
+    with Live(
+        update_display(nodes, tick), console=console, refresh_per_second=2
+    ) as live:
         while True:
             tick += 1
             live.update(update_display(nodes, tick))
@@ -205,3 +193,4 @@ def show_raft_grid():
 
 if __name__ == "__main__":
     show_raft_grid()
+
