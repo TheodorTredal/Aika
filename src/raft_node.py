@@ -309,41 +309,34 @@ class RaftNode:
                 else:
                     return jsonify({"error": "Leader unknown, try again later"}), 503
 
-    def assign_agents(self):
-        try:
-            """Called by the leader to assign agents to worker nodes and start LCs."""
-            os.makedirs(f"{self.projectPath}/data/lc_configs", exist_ok=True)
+    def ensure_lcs_running(self):
+        """Continuously ensures all LCs are running while this node is leader."""
 
-            INITIAL_PORT = "36234"
-            FINAL_PORT = "35235"
-            FIRST_NODE = self.worker_nodes[0]
-            INITIAL_LISTEN = f"0.0.0.0:{INITIAL_PORT}"
-            FINAL_LISTEN = f"0.0.0.0:{FINAL_PORT}"
-            INITIAL_ADDRESS = f"{FIRST_NODE}:{INITIAL_PORT}"
-            FINAL_ADDRESS = f"{FIRST_NODE}:{FINAL_PORT}"
+        LC_BINARY = f"{self.projectPath}/bin/inf_3203_local_controller"
+        CC_ADDRESSES = [self.address] + self.otherRaftNodes
+        INITIAL_PORT = "36234"
+        FINAL_PORT = "35235"
+        FIRST_NODE = self.worker_nodes[0]
+        INITIAL_LISTEN = f"0.0.0.0:{INITIAL_PORT}"
+        FINAL_LISTEN = f"0.0.0.0:{FINAL_PORT}"
+        INITIAL_ADDRESS = f"{FIRST_NODE}:{INITIAL_PORT}"
+        FINAL_ADDRESS = f"{FIRST_NODE}:{FINAL_PORT}"
+        INITIAL_AGENT_BINARY = f"{self.projectPath}/bin/inf_3203_initial_agent"
+        WORKER_AGENT_BINARY = f"{self.projectPath}/bin/inf_3203_worker_agent"
+        FINAL_AGENT_BINARY = f"{self.projectPath}/bin/inf_3203_final_agent"
 
-            INITIAL_AGENT_BINARY = f"{self.projectPath}/bin/inf_3203_initial_agent"
-            WORKER_AGENT_BINARY = f"{self.projectPath}/bin/inf_3203_worker_agent"
-            FINAL_AGENT_BINARY = f"{self.projectPath}/bin/inf_3203_final_agent"
-            LC_BINARY = f"{self.projectPath}/bin/inf_3203_local_controller"
-            CC_ADDRESSES = [self.address] + self.otherRaftNodes
+        os.makedirs(f"{self.projectPath}/data/lc_configs", exist_ok=True)
 
-            # Build all configs first, then launch in parallel
+        while self.state == RaftStates.LEADER and self.alive:
             launch_tasks = []
             worker_counter = 0
 
-            print(self.worker_nodes, flush=True)
             for i, node in enumerate(self.worker_nodes):
-                print(f"Processing node {i}: {node}", flush=True)
-                lc_running = self.is_lc_running(node)
-                print(f"LC running on {node}: {lc_running}", flush=True)
+                if self.is_lc_running(node):
+                    continue  # Healthy, skip
 
-                if lc_running:
-                    print(f"LC already running on {node}, skipping", flush=True)
-                    continue
-
+                # Build config for this node
                 agents = []
-
                 if i == 0:
                     agents.append({
                         "binary": INITIAL_AGENT_BINARY,
@@ -379,31 +372,27 @@ class RaftNode:
                     })
                     worker_counter += 1
 
-                lc_config = {"cluster_controllers": CC_ADDRESSES, "agents": agents}
                 config_path = f"{self.projectPath}/data/lc_configs/lc_{node}.json"
                 with open(config_path, "w") as f:
-                    json.dump(lc_config, f, indent=4)
+                    json.dump({"cluster_controllers": CC_ADDRESSES, "agents": agents}, f, indent=4)
 
                 launch_tasks.append((node, config_path))
 
-            print(f"Launching {len(launch_tasks)} LCs in parallel...", flush=True)
-            with ThreadPoolExecutor(max_workers=len(launch_tasks)) as executor:
-                futures = {}
-                for i, (node, config_path) in enumerate(launch_tasks):
-                    time.sleep(0.2)  # Stagger launches by 200ms
-                    future = executor.submit(self._start_lc, node, config_path, LC_BINARY)
-                    futures[future] = node
+            if launch_tasks:
+                print(f"Starting {len(launch_tasks)} LC(s)...", flush=True)
+                with ThreadPoolExecutor(max_workers=len(launch_tasks)) as executor:
+                    futures = {
+                        executor.submit(self._start_lc, node, config_path, LC_BINARY): node
+                        for node, config_path in launch_tasks
+                    }
+                    for future, node in futures.items():
+                        try:
+                            future.result()
+                            print(f"Started LC on {node}", flush=True)
+                        except Exception as e:
+                            print(f"Failed to start LC on {node}: {e}", flush=True)
 
-                for future in futures:
-                    node = futures[future]
-                    try:
-                        future.result()
-                        print(f"Started LC on {node}", flush=True)
-                    except Exception as e:
-                        print(f"Failed to start LC on {node}: {e}", flush=True)
-
-        except Exception as e:
-            print(e, flush=True)
+            time.sleep(10)  # Wait before next health check cycle
 
     def _start_lc(self, node, config_path, lc_binary):
         cmd = (
@@ -525,7 +514,7 @@ class RaftNode:
         self.matchIndex = {node: -1 for node in self.otherRaftNodes}
 
         threading.Thread(target=self.heartbeat_loop, daemon=True).start()
-        threading.Thread(target=self.assign_agents, daemon=True).start()
+        threading.Thread(target=self.ensure_lcs_running, daemon=True).start()
 
     def heartbeat_loop(self):
 
