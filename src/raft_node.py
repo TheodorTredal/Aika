@@ -328,6 +328,8 @@ class RaftNode:
             LC_BINARY = f"{self.projectPath}/bin/inf_3203_local_controller"
             CC_ADDRESSES = [self.address] + self.otherRaftNodes
 
+            # Build all configs first, then launch in parallel
+            launch_tasks = []
             worker_counter = 0
 
             print(self.worker_nodes, flush=True)
@@ -336,13 +338,12 @@ class RaftNode:
                 lc_running = self.is_lc_running(node)
                 print(f"LC running on {node}: {lc_running}", flush=True)
 
-                if self.is_lc_running(node):
+                if lc_running:
                     print(f"LC already running on {node}, skipping", flush=True)
                     continue
 
                 agents = []
 
-                # First node gets the initial and final agent
                 if i == 0:
                     agents.append({
                         "binary": INITIAL_AGENT_BINARY,
@@ -365,7 +366,6 @@ class RaftNode:
                         ],
                     })
 
-                # Fill remaining slots with workers
                 while len(agents) < AGENTS_PER_NODE:
                     agents.append({
                         "binary": WORKER_AGENT_BINARY,
@@ -374,6 +374,7 @@ class RaftNode:
                             "-fa-address", FINAL_ADDRESS,
                             "-agent-id", f"worker-{worker_counter}",
                             "-log-file", f"{self.projectPath}/data/logs/worker-{worker_counter}.log",
+                            "-model-path", f"{self.projectPath}/model",
                         ],
                     })
                     worker_counter += 1
@@ -383,9 +384,24 @@ class RaftNode:
                 with open(config_path, "w") as f:
                     json.dump(lc_config, f, indent=4)
 
-                print(f"Starting LC on {node}", flush=True)
-                self._start_lc(node, config_path, LC_BINARY)
-                print(f"Started LC on {node}", flush=True)
+                launch_tasks.append((node, config_path))
+
+            print(f"Launching {len(launch_tasks)} LCs in parallel...", flush=True)
+            with ThreadPoolExecutor(max_workers=len(launch_tasks)) as executor:
+                futures = {}
+                for i, (node, config_path) in enumerate(launch_tasks):
+                    time.sleep(0.2)  # Stagger launches by 200ms
+                    future = executor.submit(self._start_lc, node, config_path, LC_BINARY)
+                    futures[future] = node
+
+                for future in futures:
+                    node = futures[future]
+                    try:
+                        future.result()
+                        print(f"Started LC on {node}", flush=True)
+                    except Exception as e:
+                        print(f"Failed to start LC on {node}: {e}", flush=True)
+
         except Exception as e:
             print(e, flush=True)
 
